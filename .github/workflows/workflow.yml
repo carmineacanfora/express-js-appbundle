@@ -144,7 +144,7 @@ jobs:
       
       - name: Build Scan
         run: |            
-          jf build-scan
+          jf build-scan --vuln
       
       #- name: Docker build and push
       #  env:
