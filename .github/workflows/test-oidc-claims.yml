@@ -1,0 +1,17 @@
+name: "test-oidc-claims."
+on: 
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # This is required for requesting the JWT
+
+jobs:
+  oidc_debug_test:
+    runs-on: ubuntu-latest
+    name: A test of the oidc debugger
+    steps:
+      - name: Debug OIDC Claims
+        uses: github/actions-oidc-debugger@main
+        with:
+          audience: '${{ github.server_url }}/${{ github.repository_owner }}'
