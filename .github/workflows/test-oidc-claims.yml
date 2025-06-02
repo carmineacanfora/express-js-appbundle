@@ -1,4 +1,4 @@
-name: "test-oidc-claims."
+name: "test-oidc-claims"
 on: 
   workflow_dispatch:
 
