@@ -40,210 +40,287 @@ variables:
   DOCKER_REPO: ${{ parameters.rt_docker_repo }}
   IMAGE_NAME: ${{ parameters.docker_image_name }}
 
-pool:
-  vmImage: 'ubuntu-latest'
+stages:
+  # =================================================================
+  # Stage 1: Environment Setup
+  #   Validate inputs, checkout, verify tools
+  # =================================================================
+  - stage: EnvSetup
+    displayName: 'Environment Setup'
+    pool:
+      vmImage: 'ubuntu-latest'
+    jobs:
+      - job: SetupJob
+        displayName: 'Validate & Setup'
+        steps:
+          - script: |
+              echo "========================================="
+              echo "Pipeline Configuration"
+              echo "========================================="
+              echo "Build Name:        ${{ parameters.rt_build_name }}"
+              echo "Docker Repo:       ${{ parameters.rt_docker_repo }}"
+              echo "Image Name:        ${{ parameters.docker_image_name }}"
+              echo "NPM Remote Repo:   ${{ parameters.rt_npm_remote_repo_id }}"
+              echo "Xray Scan Enabled: ${{ parameters.xr_enable_scan }}"
+              echo "Xray Fail Build:   ${{ parameters.xr_override_fail_build }}"
+              echo "Generic Repo:      ${{ parameters.rt_generic_repo }}"
+              echo "Helm Repo:         ${{ parameters.rt_helm_repo }}"
+            displayName: 'Print Inputs'
 
-steps:
-  # ---------------------------------------------------------------
-  # 1. Print Inputs
-  # ---------------------------------------------------------------
-  - script: |
-      echo "Docker Repo:       ${{ parameters.rt_docker_repo }}"
-      echo "Image Name:        ${{ parameters.docker_image_name }}"
-      echo "NPM Remote Repo:   ${{ parameters.rt_npm_remote_repo_id }}"
-      echo "Xray Scan Enabled: ${{ parameters.xr_enable_scan }}"
-      echo "Xray Fail Build:   ${{ parameters.xr_override_fail_build }}"
-      echo "Generic Repo:      ${{ parameters.rt_generic_repo }}"
-      echo "Helm Repo:         ${{ parameters.rt_helm_repo }}"
-    displayName: 'Print Inputs'
+          - checkout: self
+            displayName: 'Checkout'
 
-  # ---------------------------------------------------------------
-  # 2. Checkout
-  # ---------------------------------------------------------------
-  - checkout: self
+          - script: |
+              docker buildx create --use --name mybuilder
+              docker buildx inspect --bootstrap
+            displayName: 'Set up Docker Buildx'
 
-  # ---------------------------------------------------------------
-  # 3. Set up Docker Buildx
-  # ---------------------------------------------------------------
-  - script: |
-      docker buildx create --use --name mybuilder
-      docker buildx inspect --bootstrap
-    displayName: 'Set up Docker Buildx'
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '18.x'
+            displayName: 'Install Node 18'
 
-  # ---------------------------------------------------------------
-  # 4. Install Node
-  # ---------------------------------------------------------------
-  - task: NodeTool@0
-    inputs:
-      versionSpec: '18.x'
-    displayName: 'Install Node 18'
+          - script: |
+              echo "Node version: $(node --version)"
+              echo "NPM version:  $(npm --version)"
+              echo "Docker version: $(docker --version)"
+              echo "Docker Buildx version: $(docker buildx version)"
+              echo "Environment setup complete."
+            displayName: 'Verify Tools'
 
-  # ---------------------------------------------------------------
-  # 5. NPM Install
-  #    On failure, curation-audit runs
-  # ---------------------------------------------------------------
-  - task: JFrogNpm@1
-    name: npmInstall
-    inputs:
-      command: 'install'
-      artifactoryConnection: 'JFrog RT - solengeu'
-      sourceRepo: '${{ parameters.rt_npm_remote_repo_id }}'
-      arguments: '--loglevel=notice'
-      collectBuildInfo: true
-      threads: 10
-      buildName: '${{ parameters.rt_build_name }}'
-      buildNumber: '$(Build.BuildId)'
-    displayName: 'NPM Install'
+  # =================================================================
+  # Stage 2: Curation Audit
+  #   NPM install through Artifactory + curation-audit on failure
+  # =================================================================
+  - stage: CurationAudit
+    displayName: 'Curation Audit'
+    dependsOn: EnvSetup
+    pool:
+      vmImage: 'ubuntu-latest'
+    jobs:
+      - job: CurationJob
+        displayName: 'NPM Install & Curation Audit'
+        steps:
+          - checkout: self
 
-  # Curation Audit, in case the NPM install failed
-  - task: JFrogCliV2@1
-    condition: not(eq(variables['Agent.JobStatus'], 'Succeeded'))
-    inputs:
-      jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: |
-        jf npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
-        jf curation-audit --threads=10
-    displayName: 'Curation Audit (on NPM failure)'
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '18.x'
+            displayName: 'Install Node 18'
 
-  # ---------------------------------------------------------------
-  # 6. Xray Audit
-  # ---------------------------------------------------------------
-  - ${{ if eq(parameters.xr_enable_scan, true) }}:
-    - task: JFrogAudit@1
-      inputs:
-        xrayConnection: 'JFrog XR - solengeu'
-        allowFailBuild: ${{ parameters.xr_override_fail_build }}
-      displayName: 'Xray Audit - NPM'
+          - task: JFrogNpm@1
+            name: npmInstall
+            continueOnError: true
+            inputs:
+              command: 'install'
+              artifactoryConnection: 'JFrog RT - solengeu'
+              sourceRepo: '${{ parameters.rt_npm_remote_repo_id }}'
+              arguments: '--loglevel=notice'
+              collectBuildInfo: true
+              threads: 10
+              buildName: '${{ parameters.rt_build_name }}'
+              buildNumber: '$(Build.BuildId)'
+            displayName: 'NPM Install'
 
-  # ---------------------------------------------------------------
-  # 7. Docker Login
-  # ---------------------------------------------------------------
-  - task: JFrogCliV2@1
-    inputs:
-      jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: 'jf docker login $(JF_URL)'
-    displayName: 'Docker Authenticate'
+          - task: JFrogCliV2@1
+            condition: not(eq(variables['Agent.JobStatus'], 'Succeeded'))
+            inputs:
+              jfrogPlatformConnection: 'JFrog CLI - solengeu'
+              command: |
+                jf npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
+                jf curation-audit --threads=10
+            displayName: 'Curation Audit (on NPM failure)'
 
-  # ---------------------------------------------------------------
-  # 8. Docker Build and Push
-  # ---------------------------------------------------------------
-  - script: |
-      IMAGE_FULL="$(JF_URL)/$(DOCKER_REPO)/$(IMAGE_NAME):$(Build.BuildId)"
-      docker buildx build \
-        --push \
-        --tag "$IMAGE_FULL" \
-        --provenance=false \
-        --metadata-file buildx-metadata.json \
-        .
+          - script: |
+              echo "##[error]NPM Install failed. See Curation Audit results above."
+              exit 1
+            condition: not(eq(variables['Agent.JobStatus'], 'Succeeded'))
+            displayName: 'Fail pipeline after Curation Audit'
 
-      # Capture the digest
-      DIGEST=$(cat buildx-metadata.json | jq -r '.["containerimage.digest"]')
+  # =================================================================
+  # Stage 3: Scan Source Code
+  #   Xray Audit on the local project dependencies
+  # =================================================================
+  - stage: ScanSourceCode
+    displayName: 'Scan Source Code'
+    dependsOn: CurationAudit
+    condition: and(succeeded(), eq('${{ parameters.xr_enable_scan }}', 'True'))
+    pool:
+      vmImage: 'ubuntu-latest'
+    jobs:
+      - job: AuditJob
+        displayName: 'Xray Audit - NPM'
+        steps:
+          - checkout: self
 
-      if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then
-        echo "##[error]Failed to capture Docker image digest."
-        exit 1
-      fi
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '18.x'
+            displayName: 'Install Node 18'
 
-      echo "IMAGE_FULL=$IMAGE_FULL"
-      echo "DIGEST=$DIGEST"
-      echo "##vso[task.setvariable variable=DOCKER_DIGEST]$DIGEST"
-      echo "##vso[task.setvariable variable=IMAGE_FULL]$IMAGE_FULL"
+          - task: JFrogNpm@1
+            inputs:
+              command: 'install'
+              artifactoryConnection: 'JFrog RT - solengeu'
+              sourceRepo: '${{ parameters.rt_npm_remote_repo_id }}'
+              arguments: '--loglevel=error'
+            displayName: 'NPM Install (for audit)'
 
-      # Prepare metadata
-      echo "$IMAGE_FULL@$DIGEST" > metadata.json
-    displayName: 'Docker Build and Push'
+          - task: JFrogAudit@1
+            inputs:
+              xrayConnection: 'JFrog XR - solengeu'
+              allowFailBuild: ${{ parameters.xr_override_fail_build }}
+            displayName: 'Xray Audit - NPM'
 
-  # ---------------------------------------------------------------
-  # 9. Add Docker Package to Build Info
-  # ---------------------------------------------------------------
-  - task: JFrogCliV2@1
-    inputs:
-      jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: |
-        jf rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name ${{ parameters.rt_build_name }} --build-number $(Build.BuildId) --project $(JF_PROJECT)
-    displayName: 'Docker Add Package to Build Info'
+  # =================================================================
+  # Stage 4: Docker Build & Push
+  # =================================================================
+  - stage: Docker
+    displayName: 'Docker Build & Push'
+    dependsOn: CurationAudit
+    pool:
+      vmImage: 'ubuntu-latest'
+    jobs:
+      - job: DockerJob
+        displayName: 'Build, Push & Collect Build Info'
+        steps:
+          - checkout: self
 
-  # ---------------------------------------------------------------
-  # 10. Upload Release Note
-  # ---------------------------------------------------------------
-  - task: JFrogGenericArtifacts@1
-    inputs:
-      command: 'Upload'
-      connection: 'JFrog RT - solengeu'
-      specSource: 'taskConfiguration'
-      fileSpec: |
-        {
-          "files": [
-            {
-              "pattern": "rn/Release-Note-App-1.0.pdf",
-              "target": "${{ parameters.rt_generic_repo }}/",
-              "flat": "true"
-            }
-          ]
-        }
-      collectBuildInfo: true
-      buildName: '${{ parameters.rt_build_name }}'
-      buildNumber: '$(Build.BuildId)'
-      module: 'release_note:$(Build.BuildId)'
-      projectKey: '$(JF_PROJECT)'
-    displayName: 'Upload Release Note'
+          - script: |
+              docker buildx create --use --name mybuilder
+              docker buildx inspect --bootstrap
+            displayName: 'Set up Docker Buildx'
 
-  # ---------------------------------------------------------------
-  # 11. Upload Helm Charts
-  # ---------------------------------------------------------------
-  - task: JFrogGenericArtifacts@1
-    inputs:
-      command: 'Upload'
-      connection: 'JFrog RT - solengeu'
-      specSource: 'taskConfiguration'
-      fileSpec: |
-        {
-          "files": [
-            {
-              "pattern": "helm/*.tgz",
-              "target": "${{ parameters.rt_helm_repo }}/",
-              "flat": "true"
-            }
-          ]
-        }
-      collectBuildInfo: true
-      buildName: '${{ parameters.rt_build_name }}'
-      buildNumber: '$(Build.BuildId)'
-      module: 'helm_charts:$(Build.BuildId)'
-      projectKey: '$(JF_PROJECT)'
-    displayName: 'Upload Helm Charts'
+          - task: JFrogCliV2@1
+            inputs:
+              jfrogPlatformConnection: 'JFrog CLI - solengeu'
+              command: 'jf docker login $(JF_URL)'
+            displayName: 'Docker Authenticate'
 
-  # ---------------------------------------------------------------
-  # 12. Collect Environment & Git Info
-  # ---------------------------------------------------------------
-  - task: JFrogCliV2@1
-    inputs:
-      jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: |
-        jf rt build-collect-env "${{ parameters.rt_build_name }}" "$(Build.BuildId)" --project $(JF_PROJECT)
-        jf rt build-add-git "${{ parameters.rt_build_name }}" "$(Build.BuildId)" --project $(JF_PROJECT)
-    displayName: 'Collect Build Environment & Git Info'
-  
-  # ---------------------------------------------------------------
-  # 13. Publish Build Info
-  # ---------------------------------------------------------------
-  - task: JFrogPublishBuildInfo@1
-    inputs:
-      artifactoryConnection: 'JFrog RT - solengeu'
-      buildName: '${{ parameters.rt_build_name }}'
-      buildNumber: '$(Build.BuildId)'
-      projectKey: '$(JF_PROJECT)'
-    displayName: 'Publish Build Info'
+          - script: |
+              IMAGE_FULL="$(JF_URL)/$(DOCKER_REPO)/$(IMAGE_NAME):$(Build.BuildId)"
+              docker buildx build \
+                --push \
+                --tag "$IMAGE_FULL" \
+                --provenance=false \
+                --metadata-file buildx-metadata.json \
+                .
 
-  # ---------------------------------------------------------------
-  # 14. Xray Build Scan
-  # ---------------------------------------------------------------
-  - task: JFrogBuildScan@1
-    inputs:
-      xrayConnection: 'JFrog XR - solengeu'
-      buildName: '${{ parameters.rt_build_name }}'
-      buildNumber: '$(Build.BuildId)'
-      projectKey: '$(JF_PROJECT)'
-      allowFailBuild: true
-      vuln: true
-    displayName: 'Xray Build Scan'
+              DIGEST=$(cat buildx-metadata.json | jq -r '.["containerimage.digest"]')
+
+              if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then
+                echo "##[error]Failed to capture Docker image digest."
+                exit 1
+              fi
+
+              echo "IMAGE_FULL=$IMAGE_FULL"
+              echo "DIGEST=$DIGEST"
+              echo "##vso[task.setvariable variable=DOCKER_DIGEST]$DIGEST"
+              echo "##vso[task.setvariable variable=IMAGE_FULL]$IMAGE_FULL"
+
+              echo "$IMAGE_FULL@$DIGEST" > metadata.json
+            displayName: 'Docker Build and Push'
+
+          - task: JFrogCliV2@1
+            inputs:
+              jfrogPlatformConnection: 'JFrog CLI - solengeu'
+              command: |
+                jf rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name ${{ parameters.rt_build_name }} --build-number $(Build.BuildId) --project $(JF_PROJECT)
+            displayName: 'Docker Add Package to Build Info'
+
+  # =================================================================
+  # Stage 5: Publish Artifacts & Build Info
+  # =================================================================
+  - stage: Publish
+    displayName: 'Publish Artifacts & Build Info'
+    dependsOn: Docker
+    pool:
+      vmImage: 'ubuntu-latest'
+    jobs:
+      - job: PublishJob
+        displayName: 'Upload Artifacts & Publish Build'
+        steps:
+          - checkout: self
+
+          - task: JFrogGenericArtifacts@1
+            inputs:
+              command: 'Upload'
+              connection: 'JFrog RT - solengeu'
+              specSource: 'taskConfiguration'
+              fileSpec: |
+                {
+                  "files": [
+                    {
+                      "pattern": "rn/Release-Note-App-1.0.pdf",
+                      "target": "${{ parameters.rt_generic_repo }}/",
+                      "flat": "true"
+                    }
+                  ]
+                }
+              collectBuildInfo: true
+              buildName: '${{ parameters.rt_build_name }}'
+              buildNumber: '$(Build.BuildId)'
+              module: 'release_note:$(Build.BuildId)'
+              projectKey: '$(JF_PROJECT)'
+            displayName: 'Upload Release Note'
+
+          - task: JFrogGenericArtifacts@1
+            inputs:
+              command: 'Upload'
+              connection: 'JFrog RT - solengeu'
+              specSource: 'taskConfiguration'
+              fileSpec: |
+                {
+                  "files": [
+                    {
+                      "pattern": "helm/*.tgz",
+                      "target": "${{ parameters.rt_helm_repo }}/",
+                      "flat": "true"
+                    }
+                  ]
+                }
+              collectBuildInfo: true
+              buildName: '${{ parameters.rt_build_name }}'
+              buildNumber: '$(Build.BuildId)'
+              module: 'helm_charts:$(Build.BuildId)'
+              projectKey: '$(JF_PROJECT)'
+            displayName: 'Upload Helm Charts'
+
+          - task: JFrogCliV2@1
+            inputs:
+              jfrogPlatformConnection: 'JFrog CLI - solengeu'
+              command: |
+                jf rt build-collect-env "${{ parameters.rt_build_name }}" "$(Build.BuildId)" --project $(JF_PROJECT)
+                jf rt build-add-git "${{ parameters.rt_build_name }}" "$(Build.BuildId)" --project $(JF_PROJECT)
+            displayName: 'Collect Build Environment & Git Info'
+
+          - task: JFrogPublishBuildInfo@1
+            inputs:
+              artifactoryConnection: 'JFrog RT - solengeu'
+              buildName: '${{ parameters.rt_build_name }}'
+              buildNumber: '$(Build.BuildId)'
+              projectKey: '$(JF_PROJECT)'
+            displayName: 'Publish Build Info'
+
+  # =================================================================
+  # Stage 6: Scan Build
+  #   Xray scan on the published build info
+  # =================================================================
+  - stage: ScanBuild
+    displayName: 'Scan Build'
+    dependsOn: Publish
+    pool:
+      vmImage: 'ubuntu-latest'
+    jobs:
+      - job: ScanJob
+        displayName: 'Xray Build Scan'
+        steps:
+          - task: JFrogBuildScan@1
+            inputs:
+              xrayConnection: 'JFrog XR - solengeu'
+              buildName: '${{ parameters.rt_build_name }}'
+              buildNumber: '$(Build.BuildId)'
+              projectKey: '$(JF_PROJECT)'
+              allowFailBuild: true
+              vuln: true
+            displayName: 'Xray Build Scan'
