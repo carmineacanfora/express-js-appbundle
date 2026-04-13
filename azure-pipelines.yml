@@ -118,10 +118,10 @@ steps:
   # ---------------------------------------------------------------
   # 7. Docker Login
   # ---------------------------------------------------------------
-  - task: Docker@2
+  - task: JFrogCliV2@1
     inputs:
-      command: 'login'
-      containerRegistry: 'JFrog Docker - solengeu'
+      jfrogPlatformConnection: 'JFrog CLI - solengeu'
+      command: 'jf docker login $(JF_URL)'
     displayName: 'Docker Authenticate'
 
   # ---------------------------------------------------------------
