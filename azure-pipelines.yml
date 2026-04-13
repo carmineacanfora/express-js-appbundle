@@ -1,4 +1,4 @@
-# Uses JFrog ADO Extension tasks for artifact management and security scanning
+# Uses dedicated JFrog ADO tasks wherever available.
 
 trigger: none  # Manual trigger equivalent to workflow_dispatch
 
@@ -75,10 +75,12 @@ steps:
     displayName: 'Install Node 18'
 
   # ---------------------------------------------------------------
-  # 5. NPM Install & Xray Audit
+  # 5. NPM Install
+  #    On failure, curation-audit runs
   # ---------------------------------------------------------------
   - task: JFrogNpm@1
     name: npmInstall
+    continueOnError: true
     inputs:
       command: 'install'
       artifactoryConnection: 'JFrog RT - solengeu'
@@ -89,6 +91,7 @@ steps:
       buildNumber: '$(Build.BuildId)'
     displayName: 'NPM Install'
 
+  # Curation Audit, in case the NPM install failed
   - task: JFrogCliV2@1
     condition: eq(variables['Agent.JobStatus'], 'Failed')
     inputs:
@@ -96,8 +99,13 @@ steps:
       command: |
         jf npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
         jf curation-audit
+        echo "##[error]NPM Install failed. See Curation Audit results above."
+        exit 1
     displayName: 'Curation Audit (on NPM failure)'
 
+  # ---------------------------------------------------------------
+  # 6. Xray Audit
+  # ---------------------------------------------------------------
   - ${{ if eq(parameters.xr_enable_scan, true) }}:
     - task: JFrogAudit@1
       inputs:
@@ -106,16 +114,16 @@ steps:
       displayName: 'Xray Audit - NPM'
 
   # ---------------------------------------------------------------
-  # 6. Docker Login to JFrog Artifactory
+  # 7. Docker Login
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: 'docker-login $(JF_URL)'
+      command: 'jf docker-login $(JF_URL)'
     displayName: 'Docker Authenticate'
 
   # ---------------------------------------------------------------
-  # 7. Docker Build and Push
+  # 8. Docker Build and Push
   # ---------------------------------------------------------------
   - script: |
       IMAGE_FULL="$(JF_URL)/$(DOCKER_REPO)/$(IMAGE_NAME):$(Build.BuildId)"
@@ -132,7 +140,7 @@ steps:
     displayName: 'Docker Build and Push'
 
   # ---------------------------------------------------------------
-  # 8. Add Docker Package to Build Info
+  # 9. Add Docker Package to Build Info
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
@@ -143,7 +151,7 @@ steps:
     displayName: 'Docker Add Package to Build Info'
 
   # ---------------------------------------------------------------
-  # 9. Upload Release Note & Helm Charts (Generic Artifacts)
+  # 10. Upload Release Note
   # ---------------------------------------------------------------
   - task: JFrogGenericArtifacts@1
     inputs:
@@ -167,6 +175,9 @@ steps:
       projectKey: '$(JF_PROJECT)'
     displayName: 'Upload Release Note'
 
+  # ---------------------------------------------------------------
+  # 11. Upload Helm Charts
+  # ---------------------------------------------------------------
   - task: JFrogGenericArtifacts@1
     inputs:
       command: 'Upload'
@@ -190,7 +201,7 @@ steps:
     displayName: 'Upload Helm Charts'
 
   # ---------------------------------------------------------------
-  # 10. Collect Environment & Git Info, then Publish Build Info
+  # 12. Collect Environment & Git Info
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
@@ -200,6 +211,9 @@ steps:
         jf rt build-add-git --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
     displayName: 'Collect Build Environment & Git Info'
 
+  # ---------------------------------------------------------------
+  # 13. Publish Build Info
+  # ---------------------------------------------------------------
   - task: JFrogPublishBuildInfo@1
     inputs:
       artifactoryConnection: 'JFrog RT - solengeu'
@@ -209,7 +223,7 @@ steps:
     displayName: 'Publish Build Info'
 
   # ---------------------------------------------------------------
-  # 11. Xray Build Scan
+  # 14. Xray Build Scan
   # ---------------------------------------------------------------
   - task: JFrogBuildScan@1
     inputs:
