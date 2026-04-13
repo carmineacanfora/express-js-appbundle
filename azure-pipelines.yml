@@ -31,13 +31,10 @@ parameters:
     displayName: 'Xray Override Fail Build'
     type: boolean
     default: "false"
-  
 
 variables:
   DOCKER_REPO: ${{ parameters.rt_docker_repo }}
   IMAGE_NAME: ${{ parameters.docker_image_name }}
-  JF_URL: $(JF_URL)           # Set as a pipeline variable or variable group
-  JF_PROJECT: $(JF_PROJECT)   # Set as a pipeline variable or variable group
 
 pool:
   vmImage: 'ubuntu-latest'
