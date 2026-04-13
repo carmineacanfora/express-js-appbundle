@@ -131,12 +131,30 @@ steps:
         --provenance=false \
         .
 
-      # Capture the digest for build-info
-      DIGEST=$(docker buildx imagetools inspect "$IMAGE_FULL" --format '{{json .Manifest.Digest}}' | tr -d '"')
+      # Capture the digest
+      DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" 2>/dev/null | cut -d'@' -f2)
+
+      # If that didn't work, try imagetools
+      if [ -z "$DIGEST" ]; then
+        DIGEST=$(docker buildx imagetools inspect "$IMAGE_FULL" --format '{{json .Manifest.Digest}}' | tr -d '"')
+      fi
+
+      # If still empty, pull and get digest
+      if [ -z "$DIGEST" ]; then
+        docker pull "$IMAGE_FULL"
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" | cut -d'@' -f2)
+      fi
+
+      echo "DEBUG: IMAGE_FULL=$IMAGE_FULL"
+      echo "DEBUG: DIGEST=$DIGEST"
+
       echo "##vso[task.setvariable variable=DOCKER_DIGEST]$DIGEST"
       echo "##vso[task.setvariable variable=IMAGE_FULL]$IMAGE_FULL"
-      # Prepare metadata for build-info
-      echo "$(IMAGE_FULL)@$(DOCKER_DIGEST)" > metadata.json
+
+      # Prepare metadata
+      echo "$IMAGE_FULL@$DIGEST" > metadata.json
+      echo "DEBUG: metadata.json content:"
+      cat metadata.json
     displayName: 'Docker Build and Push'
 
   # ---------------------------------------------------------------
