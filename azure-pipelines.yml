@@ -78,6 +78,7 @@ steps:
   # 5. NPM Install & Xray Audit (using JFrog CLI V2 task)
   # ---------------------------------------------------------------
   - task: JFrogNpm@1
+    name: npmInstall
     inputs:
       command: 'install'
       artifactoryConnection: 'JFrog RT - solengeu'
@@ -87,6 +88,13 @@ steps:
       buildName: '$(Build.DefinitionName)'
       buildNumber: '$(Build.BuildId)'
     displayName: 'NPM Install'
+
+  - task: JFrogCliV2@1
+    condition: eq(variables['Agent.JobStatus'], 'Failed')
+    inputs:
+      jfrogPlatformConnection: 'JFrog CLI - solengeu'
+      command: 'jf curation-audit'
+    displayName: 'Curation Audit (on NPM failure)'
 
   - ${{ if eq(parameters.xr_enable_scan, true) }}:
     - task: JFrogAudit@1
