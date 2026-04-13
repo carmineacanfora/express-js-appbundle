@@ -1,6 +1,10 @@
 # Uses dedicated JFrog ADO tasks wherever available.
+#
+# Stage flow:
+#   EnvSetup → CurationAudit → ScanSourceCode ──→ Publish → ScanBuild
+#                             → Docker ──────────↗
 
-trigger: none  # Manual trigger equivalent to workflow_dispatch
+trigger: none
 
 parameters:
   - name: rt_npm_remote_repo_id
@@ -43,7 +47,7 @@ variables:
 stages:
   # =================================================================
   # Stage 1: Environment Setup
-  #   Validate inputs, checkout, verify tools
+  #   Print Inputs → GIT Checkout → Setup Docker Buildx → Install Node
   # =================================================================
   - stage: EnvSetup
     displayName: 'Environment Setup'
@@ -51,8 +55,9 @@ stages:
       vmImage: 'ubuntu-latest'
     jobs:
       - job: SetupJob
-        displayName: 'Validate & Setup'
+        displayName: 'Setup Environment'
         steps:
+          # --- Print Inputs ---
           - script: |
               echo "========================================="
               echo "Pipeline Configuration"
@@ -67,30 +72,33 @@ stages:
               echo "Helm Repo:         ${{ parameters.rt_helm_repo }}"
             displayName: 'Print Inputs'
 
+          # --- GIT Checkout ---
           - checkout: self
-            displayName: 'Checkout'
+            displayName: 'GIT Checkout'
 
+          # --- Setup Docker Buildx ---
           - script: |
               docker buildx create --use --name mybuilder
               docker buildx inspect --bootstrap
-            displayName: 'Set up Docker Buildx'
+            displayName: 'Setup Docker Buildx'
 
+          # --- Install Node ---
           - task: NodeTool@0
             inputs:
               versionSpec: '18.x'
             displayName: 'Install Node 18'
 
+          # --- Verify ---
           - script: |
-              echo "Node version: $(node --version)"
-              echo "NPM version:  $(npm --version)"
-              echo "Docker version: $(docker --version)"
-              echo "Docker Buildx version: $(docker buildx version)"
-              echo "Environment setup complete."
+              echo "Node:   $(node --version)"
+              echo "NPM:    $(npm --version)"
+              echo "Docker: $(docker --version)"
+              echo "Buildx: $(docker buildx version)"
             displayName: 'Verify Tools'
 
   # =================================================================
   # Stage 2: Curation Audit
-  #   NPM install through Artifactory + curation-audit on failure
+  #   NPM Install → Curation Audit (on failure)
   # =================================================================
   - stage: CurationAudit
     displayName: 'Curation Audit'
@@ -108,6 +116,7 @@ stages:
               versionSpec: '18.x'
             displayName: 'Install Node 18'
 
+          # --- NPM Install ---
           - task: JFrogNpm@1
             name: npmInstall
             continueOnError: true
@@ -122,6 +131,7 @@ stages:
               buildNumber: '$(Build.BuildId)'
             displayName: 'NPM Install'
 
+          # --- Curation Audit (on failure) ---
           - task: JFrogCliV2@1
             condition: not(eq(variables['Agent.JobStatus'], 'Succeeded'))
             inputs:
@@ -138,8 +148,8 @@ stages:
             displayName: 'Fail pipeline after Curation Audit'
 
   # =================================================================
-  # Stage 3: Scan Source Code
-  #   Xray Audit on the local project dependencies
+  # Stage 3: Scan Source Code  (parallel with Docker)
+  #   NPM Install (for audit) → Xray Audit
   # =================================================================
   - stage: ScanSourceCode
     displayName: 'Scan Source Code'
@@ -158,6 +168,7 @@ stages:
               versionSpec: '18.x'
             displayName: 'Install Node 18'
 
+          # --- NPM Install (for audit) ---
           - task: JFrogNpm@1
             inputs:
               command: 'install'
@@ -166,6 +177,7 @@ stages:
               arguments: '--loglevel=error'
             displayName: 'NPM Install (for audit)'
 
+          # --- Xray Audit ---
           - task: JFrogAudit@1
             inputs:
               xrayConnection: 'JFrog XR - solengeu'
@@ -173,30 +185,34 @@ stages:
             displayName: 'Xray Audit - NPM'
 
   # =================================================================
-  # Stage 4: Docker Build & Push
+  # Stage 4: Build Docker Image  (parallel with Scan Source Code)
+  #   Docker Login → Docker Build & Push → Add to Build Info
   # =================================================================
   - stage: Docker
-    displayName: 'Docker Build & Push'
+    displayName: 'Build Docker Image'
     dependsOn: CurationAudit
     pool:
       vmImage: 'ubuntu-latest'
     jobs:
       - job: DockerJob
-        displayName: 'Build, Push & Collect Build Info'
+        displayName: 'Build & Push Docker Image'
         steps:
           - checkout: self
 
+          # --- Setup Docker Buildx ---
           - script: |
               docker buildx create --use --name mybuilder
               docker buildx inspect --bootstrap
-            displayName: 'Set up Docker Buildx'
+            displayName: 'Setup Docker Buildx'
 
+          # --- Docker Login ---
           - task: JFrogCliV2@1
             inputs:
               jfrogPlatformConnection: 'JFrog CLI - solengeu'
               command: 'jf docker login $(JF_URL)'
             displayName: 'Docker Authenticate'
 
+          # --- Docker Build & Push ---
           - script: |
               IMAGE_FULL="$(JF_URL)/$(DOCKER_REPO)/$(IMAGE_NAME):$(Build.BuildId)"
               docker buildx build \
@@ -221,6 +237,7 @@ stages:
               echo "$IMAGE_FULL@$DIGEST" > metadata.json
             displayName: 'Docker Build and Push'
 
+          # --- Add Docker Package to Build Info ---
           - task: JFrogCliV2@1
             inputs:
               jfrogPlatformConnection: 'JFrog CLI - solengeu'
@@ -229,19 +246,30 @@ stages:
             displayName: 'Docker Add Package to Build Info'
 
   # =================================================================
-  # Stage 5: Publish Artifacts & Build Info
+  # Stage 5: Publish
+  #   Upload Docker Build Info → Upload Release Note →
+  #   Upload Helm Charts → Collect Env & Git → Publish Build Info
   # =================================================================
   - stage: Publish
-    displayName: 'Publish Artifacts & Build Info'
-    dependsOn: Docker
+    displayName: 'Publish'
+    dependsOn:
+      - ScanSourceCode
+      - Docker
+    condition: |
+      and
+      (
+        in(dependencies.ScanSourceCode.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+        in(dependencies.Docker.result, 'Succeeded', 'SucceededWithIssues')
+      )
     pool:
       vmImage: 'ubuntu-latest'
     jobs:
       - job: PublishJob
-        displayName: 'Upload Artifacts & Publish Build'
+        displayName: 'Publish Artifacts & Build Info'
         steps:
           - checkout: self
 
+          # --- Upload Release Note ---
           - task: JFrogGenericArtifacts@1
             inputs:
               command: 'Upload'
@@ -264,6 +292,7 @@ stages:
               projectKey: '$(JF_PROJECT)'
             displayName: 'Upload Release Note'
 
+          # --- Upload Helm Charts ---
           - task: JFrogGenericArtifacts@1
             inputs:
               command: 'Upload'
@@ -286,6 +315,7 @@ stages:
               projectKey: '$(JF_PROJECT)'
             displayName: 'Upload Helm Charts'
 
+          # --- Collect Environment & Git Info ---
           - task: JFrogCliV2@1
             inputs:
               jfrogPlatformConnection: 'JFrog CLI - solengeu'
@@ -294,6 +324,7 @@ stages:
                 jf rt build-add-git "${{ parameters.rt_build_name }}" "$(Build.BuildId)" --project $(JF_PROJECT)
             displayName: 'Collect Build Environment & Git Info'
 
+          # --- Publish Build Info ---
           - task: JFrogPublishBuildInfo@1
             inputs:
               artifactoryConnection: 'JFrog RT - solengeu'
@@ -304,7 +335,7 @@ stages:
 
   # =================================================================
   # Stage 6: Scan Build
-  #   Xray scan on the published build info
+  #   Xray Build Scan on the published build info
   # =================================================================
   - stage: ScanBuild
     displayName: 'Scan Build'
@@ -315,6 +346,7 @@ stages:
       - job: ScanJob
         displayName: 'Xray Build Scan'
         steps:
+          # --- Xray Build Scan ---
           - task: JFrogBuildScan@1
             inputs:
               xrayConnection: 'JFrog XR - solengeu'
