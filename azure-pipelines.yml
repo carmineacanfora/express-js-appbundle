@@ -80,7 +80,6 @@ steps:
   # ---------------------------------------------------------------
   - task: JFrogNpm@1
     name: npmInstall
-    continueOnError: true
     inputs:
       command: 'install'
       artifactoryConnection: 'JFrog RT - solengeu'
@@ -94,14 +93,12 @@ steps:
 
   # Curation Audit, in case the NPM install failed
   - task: JFrogCliV2@1
-    condition: eq(variables['Agent.JobStatus'], 'Failed')
+    condition: not(eq(variables['Agent.JobStatus'], 'Succeeded'))
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
         jf npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
         jf curation-audit --threads=10
-        echo "##[error]NPM Install failed. See Curation Audit results above."
-        exit 1
     displayName: 'Curation Audit (on NPM failure)'
 
   # ---------------------------------------------------------------
@@ -120,7 +117,7 @@ steps:
   - task: JFrogCliV2@1
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: 'jf docker-login $(JF_URL)'
+      command: 'docker-login $(JF_URL)'
     displayName: 'Docker Authenticate'
 
   # ---------------------------------------------------------------
