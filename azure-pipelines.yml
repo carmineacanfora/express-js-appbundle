@@ -78,16 +78,7 @@ steps:
     displayName: 'Install Node 18'
 
   # ---------------------------------------------------------------
-  # 5. Install JFrog CLI via JFrog Tools Installer
-  # ---------------------------------------------------------------
-  - task: JFrogToolsInstaller@1
-    inputs:
-      artifactoryConnection: 'JFrog RT - solengeu'   # Name of your ADO service connection
-      cliInstallationRepo: 'jfrog-cli-remote'
-    displayName: 'Install JFrog CLI'
-
-  # ---------------------------------------------------------------
-  # 6. NPM Install & Xray Audit (using JFrog CLI V2 task)
+  # 5. NPM Install & Xray Audit (using JFrog CLI V2 task)
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
@@ -105,7 +96,7 @@ steps:
       displayName: 'Xray Audit - NPM'
 
   # ---------------------------------------------------------------
-  # 7. Docker Login to JFrog Artifactory
+  # 6. Docker Login to JFrog Artifactory
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
@@ -114,7 +105,7 @@ steps:
     displayName: 'Docker Authenticate'
 
   # ---------------------------------------------------------------
-  # 8. Docker Build and Push
+  # 7. Docker Build and Push
   # ---------------------------------------------------------------
   - script: |
       IMAGE_FULL="$(JF_URL)/$(DOCKER_REPO)/$(IMAGE_NAME):$(Build.BuildId)"
@@ -131,7 +122,7 @@ steps:
     displayName: 'Docker Build and Push'
 
   # ---------------------------------------------------------------
-  # 9. Add Docker Package to Build Info
+  # 8. Add Docker Package to Build Info
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
@@ -142,7 +133,7 @@ steps:
     displayName: 'Docker Add Package to Build Info'
 
   # ---------------------------------------------------------------
-  # 10. Upload Release Note & Helm Charts (Generic Artifacts)
+  # 9. Upload Release Note & Helm Charts (Generic Artifacts)
   # ---------------------------------------------------------------
   - task: JFrogGenericArtifacts@1
     inputs:
@@ -189,7 +180,7 @@ steps:
     displayName: 'Upload Helm Charts'
 
   # ---------------------------------------------------------------
-  # 11. Collect Environment & Git Info, then Publish Build Info
+  # 10. Collect Environment & Git Info, then Publish Build Info
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
@@ -208,7 +199,7 @@ steps:
     displayName: 'Publish Build Info'
 
   # ---------------------------------------------------------------
-  # 12. Xray Build Scan
+  # 11. Xray Build Scan
   # ---------------------------------------------------------------
   - task: JFrogBuildScan@1
     inputs:
