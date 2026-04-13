@@ -93,7 +93,9 @@ steps:
     condition: eq(variables['Agent.JobStatus'], 'Failed')
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: 'jf curation-audit'
+      command: |
+        jf npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
+        jf curation-audit
     displayName: 'Curation Audit (on NPM failure)'
 
   - ${{ if eq(parameters.xr_enable_scan, true) }}:
