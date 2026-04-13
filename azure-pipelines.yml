@@ -3,29 +3,35 @@
 trigger: none  # Manual trigger equivalent to workflow_dispatch
 
 parameters:
-  - name: rt_docker_repo
-    displayName: 'Docker Repository'
+  - name: rt_npm_remote_repo_id
+    displayName: 'NPM Remote Repo'
     type: string
+    default: 'carm-npmjs-remote'
+  - name: rt_generic_repo
+    displayName: 'Generic Repo'
+    type: string
+    default: 'carm-generic-dev-local'
+  - name: rt_helm_repo
+    displayName: 'Helm Repo'
+    type: string
+    default: 'carm-helm-dev-local'
+  - name: rt_docker_repo
+    displayName: 'Docker Repo'
+    type: string
+    default: 'carm-docker-dev-local'
   - name: docker_image_name
     displayName: 'Docker Image Name'
     type: string
-  - name: rt_npm_remote_repo_id
-    displayName: 'NPM Remote Repo ID'
-    type: string
+    default: 'ejs'
   - name: xr_enable_scan
     displayName: 'Enable Xray Scan'
     type: boolean
-    default: true
+    default: "false"
   - name: xr_override_fail_build
     displayName: 'Xray Override Fail Build'
     type: boolean
-    default: true
-  - name: rt_generic_repo
-    displayName: 'Generic Repository'
-    type: string
-  - name: rt_helm_repo
-    displayName: 'Helm Repository'
-    type: string
+    default: "false"
+  
 
 variables:
   DOCKER_REPO: ${{ parameters.rt_docker_repo }}
@@ -76,7 +82,7 @@ steps:
   # ---------------------------------------------------------------
   - task: JFrogToolsInstaller@1
     inputs:
-      artifactoryConnection: 'JFrogPlatform'   # Name of your ADO service connection
+      artifactoryConnection: 'JFrog RT - solengeu'   # Name of your ADO service connection
       cliInstallationRepo: 'jfrog-cli-remote'
     displayName: 'Install JFrog CLI'
 
@@ -85,7 +91,7 @@ steps:
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
-      jfrogPlatformConnection: 'JFrogPlatform'
+      jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
         npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
         npm i --omit dev
@@ -94,17 +100,17 @@ steps:
   - ${{ if eq(parameters.xr_enable_scan, true) }}:
     - task: JFrogAudit@1
       inputs:
-        xrayConnection: 'JFrogPlatform'
+        xrayConnection: 'JFrog XR - solengeu'
         allowFailBuild: ${{ parameters.xr_override_fail_build }}
       displayName: 'Xray Audit - NPM'
 
   # ---------------------------------------------------------------
   # 7. Docker Login to JFrog Artifactory
   # ---------------------------------------------------------------
-  - task: Docker@2
+  - task: JFrogCliV2@1
     inputs:
-      command: 'login'
-      containerRegistry: 'JFrogDocker'   # ADO Docker service connection pointing to your JFrog Docker registry
+      jfrogPlatformConnection: 'JFrog CLI - solengeu'
+      command: 'docker-login $(JF_URL)'
     displayName: 'Docker Authenticate'
 
   # ---------------------------------------------------------------
@@ -129,7 +135,7 @@ steps:
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
-      jfrogPlatformConnection: 'JFrogPlatform'
+      jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
         echo "$(IMAGE_FULL)@$(DOCKER_DIGEST)" > metadata.json
         rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
@@ -141,7 +147,7 @@ steps:
   - task: JFrogGenericArtifacts@1
     inputs:
       command: 'Upload'
-      connection: 'JFrogPlatform'
+      connection: 'JFrog RT - solengeu'
       specSource: 'taskConfiguration'
       fileSpec: |
         {
@@ -163,7 +169,7 @@ steps:
   - task: JFrogGenericArtifacts@1
     inputs:
       command: 'Upload'
-      connection: 'JFrogPlatform'
+      connection: 'JFrog RT - solengeu'
       specSource: 'taskConfiguration'
       fileSpec: |
         {
@@ -187,7 +193,7 @@ steps:
   # ---------------------------------------------------------------
   - task: JFrogCliV2@1
     inputs:
-      jfrogPlatformConnection: 'JFrogPlatform'
+      jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
         rt build-collect-env --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
         rt build-add-git --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
@@ -195,7 +201,7 @@ steps:
 
   - task: JFrogPublishBuildInfo@1
     inputs:
-      artifactoryConnection: 'JFrogPlatform'
+      artifactoryConnection: 'JFrog RT - solengeu'
       buildName: '$(Build.DefinitionName)'
       buildNumber: '$(Build.BuildId)'
       projectKey: '$(JF_PROJECT)'
@@ -206,7 +212,7 @@ steps:
   # ---------------------------------------------------------------
   - task: JFrogBuildScan@1
     inputs:
-      xrayConnection: 'JFrogPlatform'
+      xrayConnection: 'JFrog XR - solengeu'
       buildName: '$(Build.DefinitionName)'
       buildNumber: '$(Build.BuildId)'
       projectKey: '$(JF_PROJECT)'
