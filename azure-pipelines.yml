@@ -84,8 +84,8 @@ steps:
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
-        npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
-        npm i --omit dev
+        jf npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
+        jf npm i --omit dev
     displayName: 'NPM Configure & Install'
 
   - ${{ if eq(parameters.xr_enable_scan, true) }}:
@@ -129,7 +129,7 @@ steps:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
         echo "$(IMAGE_FULL)@$(DOCKER_DIGEST)" > metadata.json
-        rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
+        jf rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
     displayName: 'Docker Add Package to Build Info'
 
   # ---------------------------------------------------------------
@@ -186,8 +186,8 @@ steps:
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
-        rt build-collect-env --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
-        rt build-add-git --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
+        jf rt build-collect-env --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
+        jf rt build-add-git --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
     displayName: 'Collect Build Environment & Git Info'
 
   - task: JFrogPublishBuildInfo@1
