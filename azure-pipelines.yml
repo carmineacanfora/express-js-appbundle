@@ -75,7 +75,7 @@ steps:
     displayName: 'Install Node 18'
 
   # ---------------------------------------------------------------
-  # 5. NPM Install & Xray Audit (using JFrog CLI V2 task)
+  # 5. NPM Install & Xray Audit
   # ---------------------------------------------------------------
   - task: JFrogNpm@1
     name: npmInstall
@@ -84,10 +84,13 @@ steps:
       artifactoryConnection: 'JFrog RT - solengeu'
       sourceRepo: '${{ parameters.rt_npm_remote_repo_id }}'
       arguments: '--omit dev'
+      collectBuildInfo: true
+      buildName: '$(Build.DefinitionName)'
+      buildNumber: '$(Build.BuildId)'
     displayName: 'NPM Install'
 
   - task: JFrogCliV2@1
-    condition: failed()
+    condition: eq(variables['Agent.JobStatus'], 'Failed')
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
