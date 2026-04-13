@@ -83,9 +83,9 @@ stages:
             displayName: 'Setup Docker Buildx'
 
           # --- Install Node ---
-          - task: NodeTool@0
+          - task: UseNode@1
             inputs:
-              versionSpec: '18.x'
+              version: '18.x'
             displayName: 'Install Node 18'
 
           # --- Verify ---
@@ -111,9 +111,9 @@ stages:
         steps:
           - checkout: self
 
-          - task: NodeTool@0
+          - task: UseNode@1
             inputs:
-              versionSpec: '18.x'
+              version: '18.x'
             displayName: 'Install Node 18'
 
           # --- NPM Install ---
@@ -163,9 +163,9 @@ stages:
         steps:
           - checkout: self
 
-          - task: NodeTool@0
+          - task: UseNode@1
             inputs:
-              versionSpec: '18.x'
+              version: '18.x'
             displayName: 'Install Node 18'
 
           # --- NPM Install (for audit) ---
