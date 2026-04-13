@@ -135,6 +135,8 @@ steps:
       DIGEST=$(docker buildx imagetools inspect "$IMAGE_FULL" --format '{{json .Manifest.Digest}}' | tr -d '"')
       echo "##vso[task.setvariable variable=DOCKER_DIGEST]$DIGEST"
       echo "##vso[task.setvariable variable=IMAGE_FULL]$IMAGE_FULL"
+      # Prepare metadata for build-info
+      echo "$(IMAGE_FULL)@$(DOCKER_DIGEST)" > metadata.json
     displayName: 'Docker Build and Push'
 
   # ---------------------------------------------------------------
@@ -144,7 +146,6 @@ steps:
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
-        echo "$(IMAGE_FULL)@$(DOCKER_DIGEST)" > metadata.json
         jf rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
     displayName: 'Docker Add Package to Build Info'
 
