@@ -85,8 +85,9 @@ steps:
       command: 'install'
       artifactoryConnection: 'JFrog RT - solengeu'
       sourceRepo: '${{ parameters.rt_npm_remote_repo_id }}'
-      arguments: '--omit dev --threads=10'
+      arguments: '--omit dev'
       collectBuildInfo: true
+      threads: 10
       buildName: '$(Build.DefinitionName)'
       buildNumber: '$(Build.BuildId)'
     displayName: 'NPM Install'
