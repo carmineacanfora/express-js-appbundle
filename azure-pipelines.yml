@@ -23,6 +23,10 @@ parameters:
     displayName: 'Docker Image Name'
     type: string
     default: 'ejs'
+  - name: rt_build_name
+    displayName: 'Build Name'
+    type: string
+    default: 'ado-ejs-demo'
   - name: xr_enable_scan
     displayName: 'Enable Xray Scan'
     type: boolean
@@ -67,7 +71,7 @@ steps:
     displayName: 'Set up Docker Buildx'
 
   # ---------------------------------------------------------------
-  # 4. Install Node 18
+  # 4. Install Node
   # ---------------------------------------------------------------
   - task: NodeTool@0
     inputs:
@@ -87,7 +91,7 @@ steps:
       arguments: '--loglevel=notice'
       collectBuildInfo: true
       threads: 10
-      buildName: '$(Build.DefinitionName)'
+      buildName: '${{ parameters.rt_build_name }}'
       buildNumber: '$(Build.BuildId)'
     displayName: 'NPM Install'
 
@@ -114,10 +118,10 @@ steps:
   # ---------------------------------------------------------------
   # 7. Docker Login
   # ---------------------------------------------------------------
-  - task: JFrogCliV2@1
+  - task: Docker@2
     inputs:
-      jfrogPlatformConnection: 'JFrog CLI - solengeu'
-      command: 'jf docker login $(JF_URL)'
+      command: 'login'
+      containerRegistry: 'JFrog Docker - solengeu'
     displayName: 'Docker Authenticate'
 
   # ---------------------------------------------------------------
@@ -134,20 +138,6 @@ steps:
       # Capture the digest
       DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" 2>/dev/null | cut -d'@' -f2)
 
-      # If that didn't work, try imagetools
-      if [ -z "$DIGEST" ]; then
-        DIGEST=$(docker buildx imagetools inspect "$IMAGE_FULL" --format '{{json .Manifest.Digest}}' | tr -d '"')
-      fi
-
-      # If still empty, pull and get digest
-      if [ -z "$DIGEST" ]; then
-        docker pull "$IMAGE_FULL"
-        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_FULL" | cut -d'@' -f2)
-      fi
-
-      echo "DEBUG: IMAGE_FULL=$IMAGE_FULL"
-      echo "DEBUG: DIGEST=$DIGEST"
-
       if [ -z "$DIGEST" ]; then
         echo "##[error]Failed to capture Docker image digest. Build or push may have failed."
         exit 1
@@ -158,8 +148,6 @@ steps:
 
       # Prepare metadata
       echo "$IMAGE_FULL@$DIGEST" > metadata.json
-      echo "DEBUG: metadata.json content:"
-      cat metadata.json
     displayName: 'Docker Build and Push'
 
   # ---------------------------------------------------------------
@@ -169,7 +157,7 @@ steps:
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
-        jf rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name $(Build.DefinitionName) --build-number $(Build.BuildId) --project $(JF_PROJECT)
+        jf rt build-docker-create $(DOCKER_REPO) --image-file metadata.json --build-name ${{ parameters.rt_build_name }} --build-number $(Build.BuildId) --project $(JF_PROJECT)
     displayName: 'Docker Add Package to Build Info'
 
   # ---------------------------------------------------------------
@@ -191,7 +179,7 @@ steps:
           ]
         }
       collectBuildInfo: true
-      buildName: '$(Build.DefinitionName)'
+      buildName: '${{ parameters.rt_build_name }}'
       buildNumber: '$(Build.BuildId)'
       module: 'release_note:$(Build.BuildId)'
       projectKey: '$(JF_PROJECT)'
@@ -216,7 +204,7 @@ steps:
           ]
         }
       collectBuildInfo: true
-      buildName: '$(Build.DefinitionName)'
+      buildName: '${{ parameters.rt_build_name }}'
       buildNumber: '$(Build.BuildId)'
       module: 'helm_charts:$(Build.BuildId)'
       projectKey: '$(JF_PROJECT)'
@@ -229,8 +217,8 @@ steps:
     inputs:
       jfrogPlatformConnection: 'JFrog CLI - solengeu'
       command: |
-        jf rt build-collect-env "$(Build.DefinitionName)" "$(Build.BuildId)" --project $(JF_PROJECT)
-        jf rt build-add-git "$(Build.DefinitionName)" "$(Build.BuildId)" --project $(JF_PROJECT)
+        jf rt build-collect-env "${{ parameters.rt_build_name }}" "$(Build.BuildId)" --project $(JF_PROJECT)
+        jf rt build-add-git "${{ parameters.rt_build_name }}" "$(Build.BuildId)" --project $(JF_PROJECT)
     displayName: 'Collect Build Environment & Git Info'
   
   # ---------------------------------------------------------------
@@ -239,7 +227,7 @@ steps:
   - task: JFrogPublishBuildInfo@1
     inputs:
       artifactoryConnection: 'JFrog RT - solengeu'
-      buildName: '$(Build.DefinitionName)'
+      buildName: '${{ parameters.rt_build_name }}'
       buildNumber: '$(Build.BuildId)'
       projectKey: '$(JF_PROJECT)'
     displayName: 'Publish Build Info'
@@ -250,7 +238,7 @@ steps:
   - task: JFrogBuildScan@1
     inputs:
       xrayConnection: 'JFrog XR - solengeu'
-      buildName: '$(Build.DefinitionName)'
+      buildName: '${{ parameters.rt_build_name }}'
       buildNumber: '$(Build.BuildId)'
       projectKey: '$(JF_PROJECT)'
       allowFailBuild: true
