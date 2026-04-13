@@ -148,6 +148,11 @@ steps:
       echo "DEBUG: IMAGE_FULL=$IMAGE_FULL"
       echo "DEBUG: DIGEST=$DIGEST"
 
+      if [ -z "$DIGEST" ]; then
+        echo "##[error]Failed to capture Docker image digest. Build or push may have failed."
+        exit 1
+      fi
+
       echo "##vso[task.setvariable variable=DOCKER_DIGEST]$DIGEST"
       echo "##vso[task.setvariable variable=IMAGE_FULL]$IMAGE_FULL"
 
