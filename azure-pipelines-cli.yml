@@ -1,0 +1,211 @@
+# Uses JFrog CLI directly in script steps.
+# No dependency on the JFrog ADO extension.
+
+trigger: none
+
+parameters:
+  - name: rt_npm_remote_repo_id
+    displayName: 'NPM Remote Repo'
+    type: string
+    default: 'carm-npmjs-remote'
+  - name: rt_generic_repo
+    displayName: 'Generic Repo'
+    type: string
+    default: 'carm-generic-dev-local'
+  - name: rt_helm_repo
+    displayName: 'Helm Repo'
+    type: string
+    default: 'carm-helm-dev-local'
+  - name: rt_docker_repo
+    displayName: 'Docker Repo'
+    type: string
+    default: 'carm-docker-dev-local'
+  - name: docker_image_name
+    displayName: 'Docker Image Name'
+    type: string
+    default: 'ejs'
+  - name: rt_build_name
+    displayName: 'Build Name'
+    type: string
+    default: 'ado-ejs-demo'
+  - name: xr_enable_scan
+    displayName: 'Enable Xray Scan'
+    type: boolean
+    default: "false"
+  - name: xr_override_fail_build
+    displayName: 'Xray Override Fail Build'
+    type: boolean
+    default: "false"
+
+variables:
+  DOCKER_REPO: ${{ parameters.rt_docker_repo }}
+  IMAGE_NAME: ${{ parameters.docker_image_name }}
+  BUILD_NAME: ${{ parameters.rt_build_name }}
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+  # ---------------------------------------------------------------
+  # 1. Print Inputs
+  # ---------------------------------------------------------------
+  - script: |
+      echo "Docker Repo:       ${{ parameters.rt_docker_repo }}"
+      echo "Image Name:        ${{ parameters.docker_image_name }}"
+      echo "NPM Remote Repo:   ${{ parameters.rt_npm_remote_repo_id }}"
+      echo "Xray Scan Enabled: ${{ parameters.xr_enable_scan }}"
+      echo "Xray Fail Build:   ${{ parameters.xr_override_fail_build }}"
+      echo "Generic Repo:      ${{ parameters.rt_generic_repo }}"
+      echo "Helm Repo:         ${{ parameters.rt_helm_repo }}"
+      echo "Build Name:        ${{ parameters.rt_build_name }}"
+    displayName: 'Print Inputs'
+
+  # ---------------------------------------------------------------
+  # 2. Checkout
+  # ---------------------------------------------------------------
+  - checkout: self
+
+  # ---------------------------------------------------------------
+  # 3. Set up Docker Buildx
+  # ---------------------------------------------------------------
+  - script: |
+      docker buildx create --use --name mybuilder
+      docker buildx inspect --bootstrap
+    displayName: 'Set up Docker Buildx'
+
+  # ---------------------------------------------------------------
+  # 4. Install Node
+  # ---------------------------------------------------------------
+  - task: UseNode@1
+    inputs:
+      version: '18.x'
+    displayName: 'Install Node 18'
+
+  # ---------------------------------------------------------------
+  # 5. Install & Configure JFrog CLI
+  # ---------------------------------------------------------------
+  - script: |
+      curl -fL https://install-cli.jfrog.io | sh
+      jf c add my-server \
+        --url="https://$(JF_URL)/" \
+        --access-token="$(JF_ACCESS_TOKEN)" \
+        --interactive=false
+      jf c use my-server
+      echo "JFrog CLI version: $(jf --version)"
+    displayName: 'Install & Configure JFrog CLI'
+
+  # ---------------------------------------------------------------
+  # 6. NPM Install (with Curation Audit on failure)
+  # ---------------------------------------------------------------
+  - script: |
+      jf npmc --repo-resolve ${{ parameters.rt_npm_remote_repo_id }}
+      jf npm i --loglevel=notice \
+        --build-name=$(BUILD_NAME) \
+        --build-number=$(Build.BuildId) \
+        --project=$(JF_PROJECT) \
+        --threads=10 \
+        || { jf curation-audit --threads=10; exit 1; }
+    displayName: 'NPM Install (with Curation Audit on failure)'
+
+  # ---------------------------------------------------------------
+  # 7. Xray Audit
+  # ---------------------------------------------------------------
+  - ${{ if eq(parameters.xr_enable_scan, true) }}:
+    - script: |
+        jf audit --npm --fail=${{ parameters.xr_override_fail_build }}
+      displayName: 'Xray Audit - NPM'
+
+  # ---------------------------------------------------------------
+  # 8. Docker Login
+  # ---------------------------------------------------------------
+  - script: |
+      jf docker login $(JF_URL)
+    displayName: 'Docker Authenticate'
+
+  # ---------------------------------------------------------------
+  # 9. Docker Build and Push
+  # ---------------------------------------------------------------
+  - script: |
+      IMAGE_FULL="$(JF_URL)/$(DOCKER_REPO)/$(IMAGE_NAME):$(Build.BuildId)"
+      docker buildx build \
+        --push \
+        --tag "$IMAGE_FULL" \
+        --provenance=false \
+        --metadata-file buildx-metadata.json \
+        .
+
+      DIGEST=$(cat buildx-metadata.json | jq -r '.["containerimage.digest"]')
+
+      if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then
+        echo "##[error]Failed to capture Docker image digest."
+        exit 1
+      fi
+
+      echo "IMAGE_FULL=$IMAGE_FULL"
+      echo "DIGEST=$DIGEST"
+      echo "##vso[task.setvariable variable=DOCKER_DIGEST]$DIGEST"
+      echo "##vso[task.setvariable variable=IMAGE_FULL]$IMAGE_FULL"
+
+      echo "$IMAGE_FULL@$DIGEST" > metadata.json
+    displayName: 'Docker Build and Push'
+
+  # ---------------------------------------------------------------
+  # 10. Add Docker Package to Build Info
+  # ---------------------------------------------------------------
+  - script: |
+      jf rt build-docker-create $(DOCKER_REPO) \
+        --image-file metadata.json \
+        --build-name $(BUILD_NAME) \
+        --build-number $(Build.BuildId) \
+        --project $(JF_PROJECT)
+    displayName: 'Docker Add Package to Build Info'
+
+  # ---------------------------------------------------------------
+  # 11. Upload Release Note
+  # ---------------------------------------------------------------
+  - script: |
+      jf rt u "rn/Release-Note-App-1.0.pdf" "${{ parameters.rt_generic_repo }}/" \
+        --flat \
+        --module="release_note:$(Build.BuildId)" \
+        --build-name=$(BUILD_NAME) \
+        --build-number=$(Build.BuildId) \
+        --project=$(JF_PROJECT)
+    displayName: 'Upload Release Note'
+
+  # ---------------------------------------------------------------
+  # 12. Upload Helm Charts
+  # ---------------------------------------------------------------
+  - script: |
+      jf rt u "helm/*.tgz" "${{ parameters.rt_helm_repo }}/" \
+        --flat \
+        --module="helm_charts:$(Build.BuildId)" \
+        --build-name=$(BUILD_NAME) \
+        --build-number=$(Build.BuildId) \
+        --project=$(JF_PROJECT)
+    displayName: 'Upload Helm Charts'
+
+  # ---------------------------------------------------------------
+  # 13. Collect Environment & Git Info
+  # ---------------------------------------------------------------
+  - script: |
+      jf rt build-collect-env "$(BUILD_NAME)" "$(Build.BuildId)" --project $(JF_PROJECT)
+      jf rt build-add-git "$(BUILD_NAME)" "$(Build.BuildId)" --project $(JF_PROJECT)
+    displayName: 'Collect Build Environment & Git Info'
+
+  # ---------------------------------------------------------------
+  # 14. Publish Build Info
+  # ---------------------------------------------------------------
+  - script: |
+      jf rt build-publish "$(BUILD_NAME)" "$(Build.BuildId)" --project $(JF_PROJECT)
+    displayName: 'Publish Build Info'
+
+  # ---------------------------------------------------------------
+  # 15. Xray Build Scan
+  # ---------------------------------------------------------------
+  - script: |
+      jf build-scan \
+        --build-name=$(BUILD_NAME) \
+        --build-number=$(Build.BuildId) \
+        --project=$(JF_PROJECT) \
+        --vuln
+    displayName: 'Xray Build Scan'
