@@ -203,9 +203,7 @@ steps:
   # 15. Xray Build Scan
   # ---------------------------------------------------------------
   - script: |
-      jf build-scan \
-        --build-name=$(BUILD_NAME) \
-        --build-number=$(Build.BuildId) \
+      jf build-scan "$(BUILD_NAME)" "$(Build.BuildId)" \
         --project=$(JF_PROJECT) \
         --vuln
     displayName: 'Xray Build Scan'
