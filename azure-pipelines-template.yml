@@ -3,6 +3,18 @@
 
 trigger: none
 
+# Read-only repo containing the JFrog ADO Templates managed by the Platform Team
+resources:
+  repositories:
+    - repository: jfrog-templates
+      type: github
+      name: 'carmineacanfora/jfrog-ado-templates'
+      endpoint: 'carmineacanfora'
+      ref: refs/heads/main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
 extends:
   template: secured-pipeline.yml@jfrog-templates
   parameters:
