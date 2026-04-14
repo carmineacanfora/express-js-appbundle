@@ -20,7 +20,6 @@ extends:
   parameters:
     # --- JFrog Connection ---
     jfrogConnection: 'JFrog Platform - solengeu OIDC'
-    jfrogArtifactoryConnection: 'JFrog RT - solengeu OIDC'
     jfrogUrl: 'solengeu.jfrog.io'
     project: 'carm'
 
