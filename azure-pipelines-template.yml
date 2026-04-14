@@ -19,7 +19,8 @@ extends:
   template: secured-pipeline.yml@jfrog-templates
   parameters:
     # --- JFrog Connection ---
-    jfrogConnection: 'JFrog RT - solengeu OIDC'
+    jfrogConnection: 'JFrog Platform - solengeu OIDC'
+    jfrogArtifactoryConnection: 'JFrog RT - solengeu OIDC'
     jfrogUrl: 'solengeu.jfrog.io'
     project: 'carm'
 
