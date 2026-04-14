@@ -1,6 +1,6 @@
 # Uses dedicated JFrog ADO tasks wherever available.
 
-trigger: none  # Manual trigger equivalent to workflow_dispatch
+trigger: none  # Manual trigger
 
 parameters:
   - name: rt_npm_remote_repo_id
