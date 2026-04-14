@@ -77,7 +77,6 @@ extends:
     helmModuleName: 'helm_charts:$(Build.BuildId)'
 
     # --- Build Info ---
-    enableCollectBuildInfo: true
     enablePublishBuild: true
 
     # --- Build Scan ---
