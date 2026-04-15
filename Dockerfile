@@ -1,4 +1,4 @@
-FROM node:18-bookworm
+FROM node:18-bookworm-slim
 #ARG JF_TOKEN
 
 # Create app directory
