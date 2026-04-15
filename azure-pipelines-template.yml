@@ -58,7 +58,7 @@ extends:
     # Must NOT push — admin template handles push.
     dockerBuildSteps:
       - script: |
-          IMAGE_FULL="$(jfrogUrl)/carm-docker-dev-local/ejs:$(Build.BuildId)"
+          IMAGE_FULL="solengeu.jfrog.io/carm-docker-dev-local/ejs:$(Build.BuildId)"
           docker buildx build \
             --tag "$IMAGE_FULL" \
             --provenance=false \
